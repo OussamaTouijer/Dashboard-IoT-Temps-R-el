@@ -155,7 +155,7 @@
                     username: 'oussama',
                     password: 'Wac@1937'
                 },
-                topics: ['amilora/v1/data'],
+                topics: ['iot/telemetry'],
                 reconnectDelay: 5000
             },
             CHART: {
@@ -170,7 +170,7 @@
             humidityValue: document.getElementById('humidity-value'),
             status: document.getElementById('connection-status'),
             toast: document.getElementById('error-toast'),
-            cshart: null
+            chart: null
         };
 
         // État de l'application
@@ -194,13 +194,17 @@
 
             client.on('connect', () => {
                 updateConnectionStatus(true);
-                client.subscribe(CONFIG.MQTT.topics);
+                client.subscribe(CONFIG.MQTT.topics, (err) => {
+                    if (err) showError(`Erreur d'abonnement: ${err.message}`);
+                });
             });
 
             client.on('message', (topic, payload) => {
                 try {
                     const data = JSON.parse(payload.toString());
-                    validateData(data) && updateUI(data);
+                    if (validateData(data)) {
+                        updateUI(data);
+                    }
                 } catch (error) {
                     showError('Format de données invalide');
                 }
@@ -220,10 +224,10 @@
         // Validation des données
         function validateData(data) {
             const valid = 
-                typeof data.temp === 'number' && 
-                typeof data.humidity === 'number' &&
-                data.temp >= -50 && data.temp <= 100 &&
-                data.humidity >= 0 && data.humidity <= 100;
+                typeof data.data?.temp === 'number' && 
+                typeof data.data?.humidity === 'number' &&
+                data.data.temp >= -50 && data.data.temp <= 100 &&
+                data.data.humidity >= 0 && data.data.humidity <= 100;
             
             if (!valid) showError('Données capteur invalides');
             return valid;
@@ -232,28 +236,17 @@
         // Mise à jour de l'interface
         function updateUI(data) {
             // Mise à jour des valeurs
-            animateValue(ui.tempValue, data.temp, '°C');
-            animateValue(ui.humidityValue, data.humidity, '%');
+            animateValue(ui.tempValue, data.data.temp, '°C');
+            animateValue(ui.humidityValue, data.data.humidity, '%');
 
             // Mise à jour du graphique
-            updateChartData(data);
-            
-            // Historique des données
-            appState.data.temperature.push(data.temp);
-            appState.data.humidity.push(data.humidity);
-            appState.data.timestamps.push(Date.now());
-            
-            // Gestion du dépassement de capacité
-            if (appState.data.timestamps.length > CONFIG.CHART.maxDataPoints) {
-                appState.data.temperature.shift();
-                appState.data.humidity.shift();
-                appState.data.timestamps.shift();
-            }
+            updateChartData(data.data);
         }
 
         // Configuration du graphique
         function initChart() {
-            ui.chart = new Chart(document.getElementById('environmentChart'), {
+            const ctx = document.getElementById('environmentChart').getContext('2d');
+            ui.chart = new Chart(ctx, {
                 type: 'line',
                 data: {
                     datasets: [{
@@ -278,19 +271,6 @@
                                 tooltipFormat: 'HH:mm:ss'
                             }
                         }
-                    },
-                    interaction: {
-                        mode: 'nearest',
-                        intersect: false
-                    },
-                    plugins: {
-                        zoom: {
-                            zoom: {
-                                wheel: { enabled: true },
-                                pinch: { enabled: true },
-                                mode: 'x'
-                            }
-                        }
                     }
                 }
             });
@@ -298,15 +278,17 @@
 
         // Mise à jour des données du graphique
         function updateChartData(data) {
-            ui.chart.data.datasets[0].data.push({
-                x: Date.now(),
-                y: data.temp
-            });
-            ui.chart.data.datasets[1].data.push({
-                x: Date.now(),
-                y: data.humidity
-            });
-            ui.chart.update('none');
+            const now = Date.now();
+            ui.chart.data.datasets[0].data.push({ x: now, y: data.temp });
+            ui.chart.data.datasets[1].data.push({ x: now, y: data.humidity });
+
+            // Limite le nombre de points de données
+            if (ui.chart.data.datasets[0].data.length > CONFIG.CHART.maxDataPoints) {
+                ui.chart.data.datasets[0].data.shift();
+                ui.chart.data.datasets[1].data.shift();
+            }
+
+            ui.chart.update();
         }
 
         // Gestion de l'état de connexion
